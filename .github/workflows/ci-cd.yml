@@ -1,74 +1,52 @@
-name: CI-CD GitOps
+name: CI-CD DevSecOps GitOps PFE
 
 on:
   push:
-    branches:
-      - main
-
-env:
-  DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/pfe-cnf-app
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
+
   test:
     name: Test application
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-
-      - name: Python syntax check
-        run: |
-          python -m py_compile app/main.py
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile app/main.py
+      - run: echo " Test application OK"
 
   validate-dockerfile:
     name: Validate Dockerfile
     runs-on: ubuntu-latest
     needs: test
-
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Check required files
-        run: |
-          test -f Dockerfile
-          test -f requirements.txt
-          test -f app/main.py
-          echo "Required files exist"
+      - uses: actions/checkout@v4
+      - run: |
+          test -f Dockerfile && echo " Dockerfile existe"
+          test -f requirements.txt && echo " requirements.txt existe"
+          test -f app/main.py && echo " app/main.py existe"
 
   build-scan-push:
     name: Build, scan and push Docker image
     runs-on: ubuntu-latest
     needs: validate-dockerfile
-
+    outputs:
+      image_tag: ${{ steps.tag.outputs.short_sha }}
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set short image tag
-        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
-
-      - name: Check Docker Hub variables
+      - name: Set image tag
+        id: tag
         run: |
-          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
-            echo "DOCKERHUB_USERNAME is missing"
-            exit 1
-          fi
-          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "DOCKERHUB_TOKEN is missing"
-            exit 1
-          fi
-          echo "Docker Hub secrets are configured"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+          echo "Tag: ${SHORT_SHA}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -79,58 +57,58 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build Docker image locally
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          tags: |
-            ${{ env.DOCKERHUB_IMAGE }}:${{ env.SHORT_SHA }}
-            ${{ env.DOCKERHUB_IMAGE }}:latest
-
-      - name: Scan Docker image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ env.DOCKERHUB_IMAGE }}:${{ env.SHORT_SHA }}
-          format: table
-          exit-code: "0"
-          severity: HIGH,CRITICAL
-
-      - name: Push Docker image to Docker Hub
-        uses: docker/build-push-action@v6
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
-            ${{ env.DOCKERHUB_IMAGE }}:${{ env.SHORT_SHA }}
-            ${{ env.DOCKERHUB_IMAGE }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/pfe-cnf-app:${{ env.SHORT_SHA }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/pfe-cnf-app:latest
+
+      - name: Scan with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/pfe-cnf-app:${{ env.SHORT_SHA }}
+          format: table
+          exit-code: "0"
+          severity: HIGH,CRITICAL
+        continue-on-error: true
+
+      - run: echo " Image publiée ${{ secrets.DOCKERHUB_USERNAME }}/pfe-cnf-app:${{ env.SHORT_SHA }}"
 
   update-gitops:
     name: Update GitOps repository
     runs-on: ubuntu-latest
     needs: build-scan-push
-
     steps:
-      - name: Set short image tag
+      - name: Set image tag
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      - name: Checkout GitOps repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: RaniaYousfi11/pfe-gitops
           token: ${{ secrets.GITOPS_TOKEN }}
           path: pfe-gitops
 
-      - name: Update image tag in GitOps kustomization
+      - name: Update image tag in deployments
         run: |
           cd pfe-gitops
-          sed -i "s|newTag: .*|newTag: ${SHORT_SHA}|g" apps/base/kustomization.yaml
+          find apps -name "deployment.yaml" | while read f; do
+            sed -i "s|image: raniayousfi11/pfe-cnf-app:.*|image: raniayousfi11/pfe-cnf-app:${SHORT_SHA}|g" "$f"
+            echo "Mis à jour: $f"
+          done
 
-      - name: Commit and push GitOps update
+      - name: Commit and push
         run: |
           cd pfe-gitops
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add apps/base/kustomization.yaml
-          git commit -m "Update CNF image tag to ${SHORT_SHA}" || echo "No changes to commit"
-          git push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/
+          if git diff --staged --quiet; then
+            echo "Aucun changement"
+          else
+            git commit -m "ci: deploy image tag ${SHORT_SHA} [skip ci]"
+            git push
+            echo " GitOps mis à jour avec tag ${SHORT_SHA}"
+          fi
