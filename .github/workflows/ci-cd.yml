@@ -121,10 +121,12 @@ jobs:
           token: ${{ secrets.GITOPS_TOKEN }}
           path: pfe-gitops
 
-      - name: Update image tag in GitOps kustomization
+      - name: Update image tag in GitOps manifests
         run: |
           cd pfe-gitops
           sed -i "s|newTag: .*|newTag: ${SHORT_SHA}|g" apps/base/kustomization.yaml
+          find apps/hss apps/udm apps/drf -name "deployment.yaml" \
+            -exec sed -i "s|image: .*|image: raniayousfi11/pfe-cnf-app:${SHORT_SHA}|g" {} \;
 
       - name: Commit and push GitOps update
         run: |
