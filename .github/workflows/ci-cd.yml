@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/pfe-cnf-app
+  DOCKERHUB_IMAGE: raniayousfi11/pfe-cnf-app
 
 jobs:
   test:
@@ -58,17 +58,13 @@ jobs:
       - name: Set short image tag
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      - name: Check Docker Hub credentials
+      - name: Check Docker Hub token
         run: |
-          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
-            echo "DOCKERHUB_USERNAME is missing"
-            exit 1
-          fi
           if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
             echo "DOCKERHUB_TOKEN is missing"
             exit 1
           fi
-          echo "Docker Hub credentials exist"
+          echo "Docker Hub token exists"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -76,7 +72,7 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: raniayousfi11
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build Docker image locally
