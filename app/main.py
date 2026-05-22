@@ -13,7 +13,7 @@ START_TIME = time.time()
 @app.route("/")
 def home():
     return {
-        "status": "running",
+        "status": "running-from-github-actions",
         "product": PRODUCT,
         "site": SITE,
         "cnf": CNF_NAME,
