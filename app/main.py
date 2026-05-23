@@ -1,36 +1,44 @@
-from flask import Flask
+import json
 import os
-import socket
-import time
-
-app = Flask(__name__)
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 PRODUCT = os.getenv("PRODUCT", "CNF")
 SITE = os.getenv("SITE", "unknown-site")
 CNF_NAME = os.getenv("CNF_NAME", "unknown-cnf")
-START_TIME = time.time()
+STATUS = os.getenv("STATUS", "running-from-github-actions")
+PORT = int(os.getenv("PORT", "8080"))
 
-@app.route("/")
-def home():
-    return {
-        "status": "running-from-github-actions",
-        "product": PRODUCT,
-        "site": SITE,
-        "cnf": CNF_NAME,
-        "pod": socket.gethostname(),
-        "uptime_seconds": int(time.time() - START_TIME)
-    }
+class Handler(BaseHTTPRequestHandler):
+    def _send_json(self, code, data):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode("utf-8"))
 
-@app.route("/health")
-def health():
-    return {"status": "healthy"}
+    def do_GET(self):
+        if self.path in ["/", "/health"]:
+            self._send_json(200, {
+                "status": STATUS,
+                "product": PRODUCT,
+                "site": SITE,
+                "cnf_name": CNF_NAME,
+                "port": PORT
+            })
+        elif self.path == "/metrics":
+            metrics = (
+                f'cnf_status{{product="{PRODUCT}",site="{SITE}",cnf="{CNF_NAME}"}} 1\n'
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(metrics.encode("utf-8"))
+        else:
+            self._send_json(404, {"error": "not found"})
 
-@app.route("/metrics")
-def metrics():
-    return (
-        "cnf_up 1\n"
-        "cnf_requests_total 1\n"
-    ), 200, {"Content-Type": "text/plain; charset=utf-8"}
+    def log_message(self, format, *args):
+        return
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"CNF app started on 0.0.0.0:{PORT}")
+    server.serve_forever()
