@@ -6,7 +6,8 @@ on:
       - main
 
 env:
-  DOCKERHUB_IMAGE: raniayousfi11/pfe-cnf-app
+ FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
+ DOCKERHUB_IMAGE: raniayousfi11/pfe-cnf-app
 
 jobs:
   test:
